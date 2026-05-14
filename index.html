@@ -343,26 +343,6 @@ textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
       <label>Performer name <span class="req">*</span></label>
       <select id="performer">
         <option value="">Select performer</option>
-        <option>Theo Anderson</option>
-        <option>Katherine Isaev</option>
-        <option>Todd Davis</option>
-        <option>Jackson Booker</option>
-        <option>Hannah S. Callahan</option>
-        <option>Orion Tiberius Awad</option>
-        <option>Luke Nicholaides</option>
-        <option>Annalise McCombs</option>
-        <option>Jet Lowe</option>
-        <option>Emma Naik</option>
-        <option>Riaan Naik</option>
-        <option>Declan Purcell</option>
-        <option>Luu Li Pham</option>
-        <option>Charlie Adam</option>
-        <option>Judah Gene Cronce</option>
-        <option>George Zhang</option>
-        <option>Gleb Onishchenko</option>
-        <option>Lucca Farkas</option>
-        <option>Everett H. Struble</option>
-        <option>Sullivan R. Struble</option>
       </select>
     </div>
     <div class="field-row">
@@ -496,29 +476,12 @@ const GH_OWNER = 'jessewashburn';
 const GH_REPO  = 'bcgs-evaluations-data';
 const GH_PATH  = 'evaluations';
 
-/* ── performer data ── */
-const PERFORMERS = {
-  "Theo Anderson":       { age:"16",    level:"Level 15", rep1:"Barrios — Mazurka appassionata",                              rep2:"Mertz — Elegie" },
-  "Katherine Isaev":     { age:"14",    level:"Level 9",  rep1:"Fernando Sor — Estudio No. 2, Op. 35 No. 13",                 rep2:"Francisco Tárrega — Lágrima (Prelude)" },
-  "Todd Davis":          { age:"49",    level:"Level 9",  rep1:"Sor — Op. 35, No. 13",                                        rep2:"Tárrega — Lágrima" },
-  "Jackson Booker":      { age:"9",     level:"Level 5",  rep1:"Traditional — Waltz No. 10",                                  rep2:"Anonymous — Greensleeves" },
-  "Hannah S. Callahan":  { age:"16",    level:"Level 10", rep1:"Fernando Sor — Rondo Op. 48, No. 6",                          rep2:"Matteo Carcassi — Op. 60, No. 7" },
-  "Orion Tiberius Awad": { age:"14",    level:"Level 7",  rep1:"Mauro Giuliani — Allegro",                                    rep2:"Joseph Meissonnier — Waltz" },
-  "Luke Nicholaides":    { age:"14",    level:"Level 7",  rep1:"Giuliani — Allegro",                                          rep2:"Carcassi — Etude 3" },
-  "Annalise McCombs":    { age:"7",     level:"Level 4",  rep1:"Matteo Carcassi — Andante No. 4",                             rep2:"Niccolò Paganini — Andante No. 5" },
-  "Jet Lowe":            { age:"Adult", level:"Jury Comments Only", rep1:"J.S. Bach — Sarabande from Cello Suite No. 3",      rep2:"G. Frescobaldi / J. Dowland" },
-  "Emma Naik":           { age:"11",    level:"Level 6",  rep1:"Paganini — Waltz",                                            rep2:"Aguado — Study in A minor" },
-  "Riaan Naik":          { age:"6",     level:"Level 2",  rep1:"Bach — Perpetual Motion",                                     rep2:"Bach — Tanz" },
-  "Declan Purcell":      { age:"10",    level:"Level 2",  rep1:"S. Suzuki — Perpetual Motion",                                rep2:"J.C. Bach — Tanz" },
-  "Luu Li Pham":         { age:"15",    level:"Level 15", rep1:"Joaquín Turina — Hommage à Tárrega (Garrotín & Soleares)",    rep2:"Sergio Assad — Suite Aquarelle; Valseana" },
-  "Charlie Adam":        { age:"11",    level:"Level 5",  rep1:"Sor — Opus 31, No. 1",                                        rep2:"Carulli — Waltz, Op. 121, No. 1" },
-  "Judah Gene Cronce":   { age:"8",     level:"Level 4",  rep1:"Niccolò Paganini — Andante No. 5",                            rep2:"Niccolò Paganini — Corrente" },
-  "George Zhang":        { age:"11",    level:"Level 6",  rep1:"Mauro Giuliani — Allegro, Op. 50, No. 13",                    rep2:"Fernando Sor — Allegretto" },
-  "Gleb Onishchenko":    { age:"13",    level:"Level 10", rep1:"Francisco Tárrega — Adelita",                                 rep2:"Matteo Carcassi — Estudio in A minor, Op. 60 No. 7" },
-  "Lucca Farkas":        { age:"17",    level:"Level 7",  rep1:"Eduardo Sainz de la Maza — Campanas del alba",                rep2:"Scarlatti — Sonata, K. 209" },
-  "Everett H. Struble":  { age:"9",     level:"Level 3",  rep1:"F. Longay — Meadow Minuet (Suzuki Book 1)",                   rep2:"Thomas Haynes Bayly — Long Long Ago" },
-  "Sullivan R. Struble": { age:"6",     level:"Level 2",  rep1:"Dr. Suzuki — Perpetual Motion (Suzuki Book 1)",               rep2:"J.C. Bach — Tanz (Suzuki Book 1)" }
-};
+/* ── performer data ──
+   Roster lives in the private data repo as performers.json. The deploy
+   workflow fetches it (with the PAT it already holds) and substitutes
+   the JSON in place of __PERFORMERS__ during the Pages build, so the
+   public app repo never contains any student information. */
+const PERFORMERS = __PERFORMERS__;
 
 /* ── rating definitions ── */
 const SECTIONS = [
@@ -579,8 +542,16 @@ SECTIONS.forEach(sec => {
   });
 });
 
+/* ── populate performer dropdown ── */
+const performerSelect = document.getElementById('performer');
+Object.keys(PERFORMERS).forEach(name => {
+  const opt = document.createElement('option');
+  opt.textContent = name;
+  performerSelect.appendChild(opt);
+});
+
 /* ── performer autofill ── */
-document.getElementById('performer').addEventListener('change', function () {
+performerSelect.addEventListener('change', function () {
   const p = PERFORMERS[this.value];
   if (!p) return;
   ['age','level','rep1','rep2'].forEach(f => {

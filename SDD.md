@@ -44,11 +44,13 @@ bcgs-guitar-certificate/             ← APP REPO (public)
 └── README.md           # Optional: brief description for repo visitors
 
 bcgs-evaluations-data/               ← DATA REPO (private)
+├── performers.json     # Roster (names, ages, levels, repertoire) — fetched
+│                       # at build time and injected into the deployed page
 └── evaluations/        # PDFs and CSV backup land here on submission
     └── evaluations.csv # Auto-created on first submission; one row per evaluation
 ```
 
-The PAT (`EVAL_PAT` secret) is scoped only to the data repo. Even though it ends up readable in the deployed HTML, an attacker who extracts it can only write junk into the private data repo — they cannot touch the app repo, the workflow, or the PAT itself.
+The PAT (`EVAL_PAT` secret) is scoped only to the data repo. The deploy workflow uses it to **read** `performers.json` during build and to **write** evaluations on submission. Even though the PAT ends up readable in the deployed HTML, an attacker who extracts it can only read/write to the private data repo — they cannot touch the app repo, the workflow, or the PAT itself.
 
 ---
 
@@ -149,44 +151,24 @@ The CSV append is intentionally non-blocking: if the PDF write succeeds but the 
 
 ## 7. Performer Data
 
-All performer data is embedded as a JavaScript object in `index.html`. No external data source. Structure:
+The roster lives in **`performers.json` at the root of the private data repo** (`bcgs-evaluations-data`). The public app repo and this SDD do not contain any performer names, ages, levels, or repertoire — that's the privacy boundary.
 
-```js
-const PERFORMERS = {
+`index.html` declares `const PERFORMERS = __PERFORMERS__;` with a literal placeholder. The Pages deploy workflow fetches `performers.json` from the data repo (authenticated with the same `EVAL_PAT` it already uses for submissions) and substitutes the JSON in place of the placeholder during the build. The deployed page contains the real data; the source on `main` of the app repo does not.
+
+**File format:** standard JSON, keyed by full performer name:
+
+```json
+{
   "Performer Full Name": {
-    age:   "16",
-    level: "Level 15",
-    rep1:  "Composer — Title",
-    rep2:  "Composer — Title"
-  },
-  // ...
+    "age":   "16",
+    "level": "Level 15",
+    "rep1":  "Composer — Title",
+    "rep2":  "Composer — Title"
+  }
 }
 ```
 
-**Full performer list (20 performers):**
-
-| Name | Age | Level | Rep 1 | Rep 2 |
-|------|-----|-------|-------|-------|
-| Theo Anderson | 16 | Level 15 | Barrios — Mazurka appassionata | Mertz — Elegie |
-| Katherine Isaev | 14 | Level 9 | Fernando Sor — Estudio No. 2, Op. 35 No. 13 | Francisco Tárrega — Lágrima (Prelude) |
-| Todd Davis | 49 | Level 9 | Sor — Op. 35, No. 13 | Tárrega — Lágrima |
-| Jackson Booker | 9 | Level 5 | Traditional — Waltz No. 10 | Anonymous — Greensleeves |
-| Hannah S. Callahan | 16 | Level 10 | Fernando Sor — Rondo Op. 48, No. 6 | Matteo Carcassi — Op. 60, No. 7 |
-| Orion Tiberius Awad | 14 | Level 7 | Mauro Giuliani — Allegro | Joseph Meissonnier — Waltz |
-| Luke Nicholaides | 14 | Level 7 | Giuliani — Allegro | Carcassi — Etude 3 |
-| Annalise McCombs | 7 | Level 4 | Matteo Carcassi — Andante No. 4 | Niccolò Paganini — Andante No. 5 |
-| Jet Lowe | Adult | Jury Comments Only | J.S. Bach — Sarabande from Cello Suite No. 3 | G. Frescobaldi / J. Dowland |
-| Emma Naik | 11 | Level 6 | Paganini — Waltz | Aguado — Study in A minor |
-| Riaan Naik | 6 | Level 2 | Bach — Perpetual Motion | Bach — Tanz |
-| Declan Purcell | 10 | Level 2 | S. Suzuki — Perpetual Motion | J.C. Bach — Tanz |
-| Luu Li Pham | 15 | Level 15 | Joaquín Turina — Hommage à Tárrega (Garrotín & Soleares) | Sergio Assad — Suite Aquarelle; Valseana |
-| Charlie Adam | 11 | Level 5 | Sor — Opus 31, No. 1 | Carulli — Waltz, Op. 121, No. 1 |
-| Judah Gene Cronce | 8 | Level 4 | Niccolò Paganini — Andante No. 5 | Niccolò Paganini — Corrente |
-| George Zhang | 11 | Level 6 | Mauro Giuliani — Allegro, Op. 50, No. 13 | Fernando Sor — Allegretto |
-| Gleb Onishchenko | 13 | Level 10 | Francisco Tárrega — Adelita | Matteo Carcassi — Estudio in A minor, Op. 60 No. 7 |
-| Lucca Farkas | 17 | Level 7 | Eduardo Sainz de la Maza — Campanas del alba | Scarlatti — Sonata, K. 209 |
-| Everett H. Struble | 9 | Level 3 | F. Longay — Meadow Minuet (Suzuki Book 1) | Thomas Haynes Bayly — Long Long Ago |
-| Sullivan R. Struble | 6 | Level 2 | Dr. Suzuki — Perpetual Motion (Suzuki Book 1) | J.C. Bach — Tanz (Suzuki Book 1) |
+**To update the roster:** edit `performers.json` in the data repo and commit. Then trigger a Pages redeploy on the app repo — either push any change to `index.html`/workflow, or run the workflow manually via Actions → "Deploy to GitHub Pages" → Run workflow. The data repo's pushes do not auto-trigger a redeploy because the workflow lives on the app repo and only watches that repo's `main`.
 
 ---
 
@@ -247,7 +229,7 @@ BCGS Certificate Program  ·  Adjudicator Name  ·  Date
 evaluations/{PerformerName}_{AdjudicatorFirstName}_{ISO-timestamp}.pdf
 
 Example:
-evaluations/Theo_Anderson_Franco_2026-05-14T10-30-00.pdf
+evaluations/Performer_Name_Adjudicator_2026-05-14T10-30-00.pdf
 ```
 
 ---
@@ -387,7 +369,7 @@ All state lives in JavaScript variables within the single HTML file. No localSto
 ```js
 const ratings = {};       // { "groupId::itemLabel": 0-10 }
 let current = 1;          // active section number (1-7)
-const PERFORMERS = {...}  // static lookup table
+const PERFORMERS = {...}  // injected at deploy time from data repo
 const SECTIONS = [...]    // rating group definitions
 ```
 
@@ -400,18 +382,19 @@ Reset on "New evaluation": clears all select/input/textarea values, zeros all ra
 **One-time setup:**
 
 1. Create the **data repo**: `bcgs-evaluations-data`, **Private**, initialize with any file (a README is fine).
-2. Generate a fine-grained PAT at github.com/settings/personal-access-tokens/new:
+2. Create `performers.json` at the root of the data repo with the roster (see §7 for format).
+3. Generate a fine-grained PAT at github.com/settings/personal-access-tokens/new:
    - Resource owner: `jessewashburn`
    - Repository access: **Only select repositories** → `bcgs-evaluations-data` (NOT the app repo)
    - Repository permissions → **Contents: Read and write**
-3. On the **app repo** (`bcgs-guitar-certificate`): Settings → Secrets and variables → Actions → New repository secret. Name: `EVAL_PAT`. Value: the PAT from step 2.
-4. On the **app repo**: Settings → Pages → Source: **GitHub Actions** (not "Deploy from a branch").
-5. Commit `index.html`, `.github/workflows/deploy.yml`, and `SDD.md` to `main` of the app repo.
-6. The workflow runs on push to `main`. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`. The first submission auto-creates `evaluations/evaluations.csv` and the first PDF in the data repo.
+4. On the **app repo** (`bcgs-guitar-certificate`): Settings → Secrets and variables → Actions → New repository secret. Name: `EVAL_PAT`. Value: the PAT from step 3.
+5. On the **app repo**: Settings → Pages → Source: **GitHub Actions** (not "Deploy from a branch").
+6. Commit `index.html`, `.github/workflows/deploy.yml`, and `SDD.md` to `main` of the app repo.
+7. The workflow runs on push to `main`. It fetches `performers.json` from the data repo, injects roster + PAT into `index.html`, and deploys. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`. The first submission auto-creates `evaluations/evaluations.csv` and the first PDF in the data repo.
 
-**Subsequent updates:** Any push to the app repo's `main` that touches `index.html` (or the workflow itself) triggers a redeploy. The data repo is never touched by CI — only by form submissions.
+**Subsequent updates:** Any push to the app repo's `main` that touches `index.html` (or the workflow itself) triggers a redeploy. The data repo is **not** watched — pushing changes to `performers.json` or `evaluations/` does not redeploy on its own.
 
-**To update performer data:** Edit the `PERFORMERS` object in `index.html` and commit. The workflow injects the secret and redeploys automatically.
+**To update performer data:** Edit `performers.json` in the data repo and commit. Then trigger a redeploy on the app repo: either push any change to `index.html`/workflow, or run the workflow manually via the Actions tab → "Deploy to GitHub Pages" → Run workflow.
 
 **To rotate the GitHub token:**
 1. Generate a new fine-grained PAT (same scope — data repo only, Contents: R/W).
