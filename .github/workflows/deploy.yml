@@ -1,0 +1,60 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'evaluations/**'
+      - 'SDD.md'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+
+      - name: Inject PAT into index.html
+        env:
+          EVAL_PAT: ${{ secrets.EVAL_PAT }}
+        run: |
+          if [ -z "$EVAL_PAT" ]; then
+            echo "::error::Repository secret EVAL_PAT is not set."
+            exit 1
+          fi
+          if ! grep -q '__GH_TOKEN__' _site/index.html; then
+            echo "::error::Placeholder __GH_TOKEN__ not found in index.html."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, pathlib
+          p = pathlib.Path('_site/index.html')
+          p.write_text(p.read_text().replace('__GH_TOKEN__', os.environ['EVAL_PAT']))
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
