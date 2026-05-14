@@ -488,10 +488,12 @@ textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
 <div class="toast" id="toast"></div>
 
 <script>
-/* ── config ── */
+/* ── config ──
+   Submissions write to a separate private repo so the public app repo
+   (the one serving this page) never contains student evaluation data. */
 const GH_TOKEN = '__GH_TOKEN__';
 const GH_OWNER = 'jessewashburn';
-const GH_REPO  = 'bcgs-guitar-certificate';
+const GH_REPO  = 'bcgs-evaluations-data';
 const GH_PATH  = 'evaluations';
 
 /* ── performer data ── */
@@ -640,6 +642,89 @@ function calcScores() {
   });
   out._total = total;
   return out;
+}
+
+/* ── CSV backup ──
+   Every submission appends a row to evaluations/evaluations.csv so we
+   have a structured, queryable backup alongside the PDFs. */
+
+const CSV_PATH = GH_PATH + '/evaluations.csv';
+
+function csvEscape(v) {
+  const s = (v == null ? '' : String(v));
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+function csvHeader() {
+  const cols = ['timestamp','adjudicator','performer','age','level','rep1','rep2'];
+  SECTIONS.forEach(sec => sec.items.forEach(item => cols.push(sec.label + ' :: ' + item)));
+  SECTIONS.forEach(sec => cols.push(sec.label + ' total'));
+  cols.push('grand_total','pass_to_next_level','try_this_level_again','recommend_level','comments','recommendations','pdf_filename');
+  return cols.map(csvEscape).join(',') + '\r\n';
+}
+
+function csvRow(meta, scores, pdfFilename) {
+  const get = id => (document.getElementById(id) || {}).value || '';
+  const cells = [
+    new Date().toISOString(),
+    meta.adj, meta.perf,
+    get('age'), get('level'), get('rep1'), get('rep2')
+  ];
+  SECTIONS.forEach(sec => sec.items.forEach(item => cells.push(ratings[sec.id + '::' + item] || 0)));
+  SECTIONS.forEach(sec => cells.push(scores[sec.label] || 0));
+  cells.push(scores._total);
+  cells.push(get('pass-next'), get('try-again'), get('recommend-level'), get('comments'), get('recommendations'));
+  cells.push(pdfFilename);
+  return cells.map(csvEscape).join(',') + '\r\n';
+}
+
+function b64encodeUtf8(str) {
+  return btoa(String.fromCharCode.apply(null, new TextEncoder().encode(str)));
+}
+
+function b64decodeUtf8(b64) {
+  return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+}
+
+async function appendCsvRow(rowString, meta) {
+  const url = 'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + CSV_PATH;
+  const authHeaders = {
+    'Authorization': 'token ' + GH_TOKEN,
+    'Accept': 'application/vnd.github+json'
+  };
+
+  async function attempt() {
+    const getRes = await fetch(url, { headers: authHeaders, cache: 'no-store' });
+    let existing = '';
+    let sha = null;
+    if (getRes.status === 200) {
+      const body = await getRes.json();
+      existing = b64decodeUtf8(body.content.replace(/\n/g, ''));
+      sha = body.sha;
+    } else if (getRes.status !== 404) {
+      throw new Error('CSV GET failed: ' + getRes.status);
+    }
+
+    const next = (existing || csvHeader()) + rowString;
+    const putBody = {
+      message: 'Append CSV row: ' + meta.perf + ' — ' + meta.adj,
+      content: b64encodeUtf8(next)
+    };
+    if (sha) putBody.sha = sha;
+
+    const putRes = await fetch(url, {
+      method: 'PUT',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
+      body: JSON.stringify(putBody)
+    });
+    return putRes;
+  }
+
+  let res = await attempt();
+  if (res.status === 409 || res.status === 422) {
+    res = await attempt();
+  }
+  if (!res.ok) throw new Error('CSV PUT failed: ' + res.status);
 }
 
 /* ── PDF generation ── */
@@ -843,7 +928,15 @@ async function submitForm() {
 
     if (!res.ok) throw new Error('GitHub API error: ' + res.status);
 
-    showToast('Saved!');
+    const scores = calcScores();
+
+    try {
+      await appendCsvRow(csvRow({ adj, perf }, scores, filename), { adj, perf });
+      showToast('Saved!');
+    } catch (csvErr) {
+      console.error('CSV append failed (PDF was saved):', csvErr);
+      showToast('PDF saved — CSV backup failed.', true);
+    }
 
     /* show success */
     document.getElementById('section-7').classList.remove('active');
@@ -851,7 +944,6 @@ async function submitForm() {
     document.getElementById('progress-bar').style.display = 'none';
     document.getElementById('progress-label').style.display = 'none';
 
-    const scores = calcScores();
     const maxTotal = SECTIONS.reduce((a, s) => a + s.items.length * 10, 0);
 
     document.getElementById('success-who').textContent = adj + '  ·  ' + perf;

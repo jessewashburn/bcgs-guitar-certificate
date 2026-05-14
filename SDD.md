@@ -3,14 +3,15 @@
 
 **Version:** 1.0  
 **Date:** 2026-05-14  
-**Repo:** `jessewashburn/bcgs-guitar-certificate`  
+**App repo (public):** `jessewashburn/bcgs-guitar-certificate`  
+**Data repo (private):** `jessewashburn/bcgs-evaluations-data`  
 **Deployed at:** `https://jessewashburn.github.io/bcgs-guitar-certificate/`
 
 ---
 
 ## 1. Overview
 
-A single-page web application hosted on GitHub Pages that allows music adjudicators to complete structured evaluation forms for guitar certificate program performers. On submission, a formatted PDF of the evaluation is generated client-side and committed directly to the GitHub repository via the GitHub Contents API. No server, no login, no download required from the judge's perspective.
+A single-page web application hosted on GitHub Pages that allows music adjudicators to complete structured evaluation forms for guitar certificate program performers. On submission, a formatted PDF of the evaluation is generated client-side and committed directly to a **separate private GitHub repository** via the GitHub Contents API. The app repo (which serves the page) stays public so GitHub Pages works on the free tier; the data repo stays private so submitted evaluations are not exposed to the public web. No server, no login, no download required from the judge's perspective.
 
 ---
 
@@ -21,7 +22,8 @@ A single-page web application hosted on GitHub Pages that allows music adjudicat
 | Zero friction for judges | Public URL, no account, no install, works on any device |
 | Auto-populated performer data | Selecting a performer fills age, level, and repertoire automatically |
 | Structured scoring | 1–10 rating pills across 5 rubric categories |
-| PDF output | Professional formatted evaluation PDF saved to the repo |
+| PDF output | Professional formatted evaluation PDF saved to the private data repo |
+| Student data privacy | Submitted PDFs and CSV live in a private repo, not the public app repo |
 | No backend | Pure static HTML/CSS/JS, GitHub Pages only |
 | No judge login | GitHub API auth handled via scoped PAT injected at deploy time |
 
@@ -29,18 +31,24 @@ A single-page web application hosted on GitHub Pages that allows music adjudicat
 
 ## 3. Repository Structure
 
+Two repos. The **app repo** serves the page and contains no student data. The **data repo** is private and receives every submission.
+
 ```
-bcgs-guitar-certificate/
+bcgs-guitar-certificate/             ← APP REPO (public)
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml  # Injects EVAL_PAT into index.html and deploys to Pages
 ├── index.html          # Entire application (HTML + CSS + JS, single file)
 │                       # Contains __GH_TOKEN__ placeholder, replaced at build
-├── evaluations/        # PDFs land here on submission
-│   └── .gitkeep        # Placeholder to initialize the folder
 ├── SDD.md              # This document
 └── README.md           # Optional: brief description for repo visitors
+
+bcgs-evaluations-data/               ← DATA REPO (private)
+└── evaluations/        # PDFs and CSV backup land here on submission
+    └── evaluations.csv # Auto-created on first submission; one row per evaluation
 ```
+
+The PAT (`EVAL_PAT` secret) is scoped only to the data repo. Even though it ends up readable in the deployed HTML, an attacker who extracts it can only write junk into the private data repo — they cannot touch the app repo, the workflow, or the PAT itself.
 
 ---
 
@@ -51,8 +59,8 @@ bcgs-guitar-certificate/
 | Hosting | GitHub Pages | Free, zero config, serves from `main` branch root |
 | Frontend | Vanilla HTML/CSS/JS | No build step, no dependencies to manage |
 | PDF generation | jsPDF (CDN) | Client-side, no server needed, good layout control |
-| Storage | GitHub Contents API | Commits PDF as base64 directly to repo |
-| Auth | Fine-grained PAT (injected at deploy) | Scoped to this repo, contents write only. Stored as GitHub Actions secret `EVAL_PAT`, injected into `index.html` during the Pages build. |
+| Storage | GitHub Contents API | Commits PDF as base64 directly to private data repo |
+| Auth | Fine-grained PAT (injected at deploy) | Scoped to data repo only, Contents: R/W. Stored as GitHub Actions secret `EVAL_PAT` on the app repo, injected into `index.html` during the Pages build. |
 | Fonts | Google Fonts (Playfair Display + DM Sans) | Loaded via CDN link tag |
 
 ---
@@ -68,9 +76,12 @@ bcgs-guitar-certificate/
    a. Client-side validation (adjudicator, performer, pass/fail recommendation required)
    b. jsPDF builds a formatted PDF from all form state
    c. PDF is base64-encoded
-   d. PUT request to GitHub Contents API commits the file to /evaluations/
-   e. Success screen shows score summary
-   f. Judge can start a new evaluation (full reset)
+   d. PUT request to the GitHub Contents API commits the PDF to `bcgs-evaluations-data/evaluations/`
+   e. GET → mutate → PUT round-trip appends a row to `bcgs-evaluations-data/evaluations/evaluations.csv` (creates the file with a header on first submission)
+   f. Success screen shows score summary
+   g. Judge can start a new evaluation (full reset)
+
+The CSV append is intentionally non-blocking: if the PDF write succeeds but the CSV append fails, the success screen still renders and a warning toast surfaces the CSV failure. The PDF is the canonical record; the CSV is a queryable backup.
 ```
 
 ---
@@ -241,9 +252,56 @@ evaluations/Theo_Anderson_Franco_2026-05-14T10-30-00.pdf
 
 ---
 
-## 9. GitHub API Integration
+## 9. CSV Backup
 
-**Endpoint:** `PUT https://api.github.com/repos/jessewashburn/bcgs-guitar-certificate/contents/{path}`
+**File:** `bcgs-evaluations-data/evaluations/evaluations.csv` (in the private data repo) — auto-created on first submission, one row appended per submission. Lives alongside the PDFs and serves as a queryable backup / index of all evaluations.
+
+**Format:** RFC 4180 (CRLF line endings, all fields quoted, embedded `"` doubled). UTF-8.
+
+**Columns** (in order):
+
+| Column | Source |
+|--------|--------|
+| `timestamp` | ISO-8601 (`new Date().toISOString()`) |
+| `adjudicator` | Section 1 |
+| `performer` | Section 1 |
+| `age` | Section 1 (autofilled, editable) |
+| `level` | Section 1 (autofilled, editable) |
+| `rep1` | Section 1 (autofilled, editable) |
+| `rep2` | Section 1 (autofilled, editable) |
+| `Scales :: <item>` (×6) | Section 2 ratings, 0–10 each |
+| `Performance — General :: <item>` (×3) | Section 3 ratings |
+| `Performance — Technique :: <item>` (×4) | Section 4 ratings |
+| `Performance — Interpretation :: <item>` (×7) | Section 5 ratings |
+| `Performance — Presentation :: <item>` (×3) | Section 6 ratings |
+| `<section> total` (×5) | Computed section totals |
+| `grand_total` | Sum of section totals (max 230) |
+| `pass_to_next_level` | Section 7 dropdown |
+| `try_this_level_again` | Section 7 dropdown |
+| `recommend_level` | Section 7 text |
+| `comments` | Section 7 textarea |
+| `recommendations` | Section 7 textarea |
+| `pdf_filename` | Path of the PDF written in the preceding API call |
+
+**Header columns** are emitted by `csvHeader()` in `index.html`; the column count and order are derived from `SECTIONS`, so adding a rubric item automatically extends the CSV schema (existing rows will simply have fewer trailing fields — readers must tolerate jagged rows or you backfill manually).
+
+**Append mechanism:** GitHub's Contents API has no native append, so each write is:
+
+1. `GET /repos/.../contents/evaluations.csv` → decode base64 body, capture `sha`. A 404 means this is the first submission.
+2. Concatenate `existing || csvHeader()` + `newRow`.
+3. `PUT` the full file content with the captured `sha`.
+
+A 409 / 422 response indicates the SHA was stale (another judge submitted between our GET and PUT). The client retries once. If it still fails, the CSV append is reported as a soft error — the PDF was already saved, so the submission as a whole succeeds and a warning toast surfaces the CSV failure.
+
+**Race window:** GET → PUT is a few hundred ms. With three judges submitting sequentially through the same scheduled program, collisions are unlikely. The single retry covers the realistic worst case.
+
+---
+
+## 10. GitHub API Integration
+
+**Endpoint:** `PUT https://api.github.com/repos/jessewashburn/bcgs-evaluations-data/contents/{path}`
+
+The host `index.html` is served from the public app repo, but every API call from the form targets the **private data repo** above. The `GH_OWNER`, `GH_REPO`, and `GH_PATH` constants in `index.html` define this target.
 
 **Headers:**
 ```
@@ -260,22 +318,22 @@ Accept: application/vnd.github+json
 }
 ```
 
-**Token:** Fine-grained PAT, scoped to `bcgs-guitar-certificate` repo, Contents: Read & Write only.
+**Token:** Fine-grained PAT, scoped to `bcgs-evaluations-data` only, Contents: Read & Write. No access to the app repo, no other permissions.
 
 **Storage model:**
-- Source on `main` contains the literal placeholder `__GH_TOKEN__` in `index.html`.
-- The PAT is stored as a repository secret named `EVAL_PAT`.
+- Source on the app repo's `main` contains the literal placeholder `__GH_TOKEN__` in `index.html`.
+- The PAT is stored as a repository secret named `EVAL_PAT` on the **app repo** (`bcgs-guitar-certificate`), since that's where the Pages workflow runs.
 - The Pages deploy workflow (`.github/workflows/deploy.yml`) substitutes the placeholder into a copy of `index.html` during the build, then publishes the result to GitHub Pages.
-- The token never lands on `main` and never appears in git history.
+- The token never lands on `main` of either repo and never appears in git history.
 
-**Threat model note:** A visitor to the deployed site can still read the PAT via View Source on the served HTML. The token's blast radius is intentionally minimal — Contents: R/W on this one repo — so the worst-case abuse remains junk file commits here. The secret-injection approach is about keeping the token out of repo source and git history (and therefore out of GitHub's secret-scanning auto-revoke path), not about hiding it from the browser.
+**Threat model note:** A visitor to the deployed site can still read the PAT via View Source on the served HTML. With the split-repo architecture, the token's blast radius is *only* the private data repo — an attacker can write junk commits into `bcgs-evaluations-data` but cannot touch the app source, modify the form, or rotate their own privileges. The secret-injection approach keeps the token out of repo source and git history; the split-repo design caps the worst-case damage even if the token leaks from the browser.
 
 **On success (201):** Show success screen with score breakdown.  
 **On failure:** Show error toast, re-enable submit button so judge can retry.
 
 ---
 
-## 10. UI/UX Design Spec
+## 11. UI/UX Design Spec
 
 **Aesthetic:** Refined editorial — warm cream backgrounds, gold accents, Playfair Display serif headings, DM Sans body. Feels like a music conservatory program, not a generic form.
 
@@ -310,7 +368,7 @@ Accept: application/vnd.github+json
 
 ---
 
-## 11. Validation Rules
+## 12. Validation Rules
 
 | Rule | When checked |
 |------|-------------|
@@ -322,7 +380,7 @@ All other fields are optional. Unscored rating items default to 0 and are shown 
 
 ---
 
-## 12. State Management
+## 13. State Management
 
 All state lives in JavaScript variables within the single HTML file. No localStorage, no cookies, no external state.
 
@@ -337,33 +395,38 @@ Reset on "New evaluation": clears all select/input/textarea values, zeros all ra
 
 ---
 
-## 13. Deployment Steps
+## 14. Deployment Steps
 
 **One-time setup:**
 
-1. Generate a fine-grained PAT at github.com/settings/tokens?type=beta — scope to the `bcgs-guitar-certificate` repo, Contents: Read & Write only.
-2. In the repo: Settings → Secrets and variables → Actions → New repository secret. Name: `EVAL_PAT`. Value: the PAT.
-3. In the repo: Settings → Pages → Source: **GitHub Actions** (not "Deploy from a branch").
-4. Commit `index.html`, `evaluations/.gitkeep`, `.github/workflows/deploy.yml`, and `SDD.md` to `main`.
-5. The workflow runs on push to `main`. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`.
+1. Create the **data repo**: `bcgs-evaluations-data`, **Private**, initialize with any file (a README is fine).
+2. Generate a fine-grained PAT at github.com/settings/personal-access-tokens/new:
+   - Resource owner: `jessewashburn`
+   - Repository access: **Only select repositories** → `bcgs-evaluations-data` (NOT the app repo)
+   - Repository permissions → **Contents: Read and write**
+3. On the **app repo** (`bcgs-guitar-certificate`): Settings → Secrets and variables → Actions → New repository secret. Name: `EVAL_PAT`. Value: the PAT from step 2.
+4. On the **app repo**: Settings → Pages → Source: **GitHub Actions** (not "Deploy from a branch").
+5. Commit `index.html`, `.github/workflows/deploy.yml`, and `SDD.md` to `main` of the app repo.
+6. The workflow runs on push to `main`. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`. The first submission auto-creates `evaluations/evaluations.csv` and the first PDF in the data repo.
 
-**Subsequent updates:** Any push to `main` that touches `index.html` (or the workflow itself) triggers a redeploy. PDF commits under `evaluations/` are ignored by the workflow (`paths-ignore`) so they don't trigger wasted rebuilds.
+**Subsequent updates:** Any push to the app repo's `main` that touches `index.html` (or the workflow itself) triggers a redeploy. The data repo is never touched by CI — only by form submissions.
 
 **To update performer data:** Edit the `PERFORMERS` object in `index.html` and commit. The workflow injects the secret and redeploys automatically.
 
 **To rotate the GitHub token:**
-1. Generate a new fine-grained PAT (same scope).
-2. Update the `EVAL_PAT` secret value in repo Settings.
-3. Trigger a redeploy: either push any change to `index.html`, or run the workflow manually via the Actions tab → "Deploy to GitHub Pages" → Run workflow.
-4. Revoke the old PAT.
+1. Generate a new fine-grained PAT (same scope — data repo only, Contents: R/W).
+2. Update the `EVAL_PAT` secret value on the app repo.
+3. Trigger a redeploy: push any change to `index.html`, or run the workflow manually via the Actions tab → "Deploy to GitHub Pages" → Run workflow.
+4. Revoke the old PAT at github.com/settings/personal-access-tokens.
 
 ---
 
-## 14. Known Limitations & Future Considerations
+## 15. Known Limitations & Future Considerations
 
 | Item | Note |
 |------|------|
-| No duplicate submission guard | Two judges could theoretically submit simultaneously and collide on the same filename. Timestamp in filename makes this extremely unlikely but not impossible. Could add a random suffix if needed. |
+| No duplicate submission guard | Two judges could theoretically submit simultaneously and collide on the same PDF filename. Timestamp in filename makes this extremely unlikely but not impossible. Could add a random suffix if needed. |
+| CSV concurrent-write race | Appending to `evaluations.csv` is a GET-then-PUT cycle with optimistic SHA matching. Simultaneous submits can race; one retry covers the realistic case. If both retries lose, the CSV row is dropped (the PDF still saves). A more robust design would queue writes through a serverless function — out of scope for this version. |
 | No offline support | Requires internet for Google Fonts, jsPDF CDN, and GitHub API. Could be made fully offline with inlined assets. |
 | Token rotation | PAT has an expiration date set at creation. Needs manual rotation before expiry. Set a calendar reminder. |
 | Score of 0 | Unrated items score 0. PDF shows "—" for unscored items so it's clear vs. a deliberate 0. Consider whether all items should be required. |
