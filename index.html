@@ -604,14 +604,22 @@ function showToast(msg, isError = false) {
 /* ── score calc ── */
 function calcScores() {
   const out = {};
-  let total = 0;
+  out._max = {};            // per-section max, keyed by label
+  let total = 0, totalMax = 0;
   SECTIONS.forEach(sec => {
-    let sum = 0;
-    sec.items.forEach(item => { sum += ratings[sec.id + '::' + item] || 0; });
+    let sum = 0, max = 0;
+    sec.items.forEach(item => {
+      const score = ratings[sec.id + '::' + item] || 0;
+      // Only scored items (score > 0) count toward the section/overall max.
+      if (score > 0) { sum += score; max += 10; }
+    });
     out[sec.label] = sum;
+    out._max[sec.label] = max;
     total += sum;
+    totalMax += max;
   });
   out._total = total;
+  out._totalMax = totalMax;
   return out;
 }
 
@@ -768,7 +776,13 @@ async function buildPDF() {
   doc.line(M, y, W - M, y); y += 8;
 
   /* rating sections */
+  const PAGE_BOTTOM = 265; // leave room for footer rule at 272
   SECTIONS.forEach(sec => {
+    /* page break check — estimate full section height and break BEFORE drawing
+       so a section never starts so low that its rows spill past the page */
+    const sectionHeight = 10 + sec.items.length * 7 + 8; // header + rows + subtotal
+    if (y + sectionHeight > PAGE_BOTTOM) { doc.addPage(); y = M; }
+
     /* section header */
     doc.setFillColor(...navy);
     doc.roundedRect(M, y, CW, 7, 1, 1, 'F');
@@ -776,7 +790,7 @@ async function buildPDF() {
     doc.text(sec.label.toUpperCase(), M + 4, y + 5); y += 10;
 
     const sectionTotal = scores[sec.label] || 0;
-    const sectionMax   = sec.items.length * 10;
+    const sectionMax   = scores._max[sec.label] || 0;
 
     sec.items.forEach((item, idx) => {
       const key   = sec.id + '::' + item;
@@ -807,13 +821,10 @@ async function buildPDF() {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...navy);
     doc.text('Section total: ' + sectionTotal + ' / ' + sectionMax, W - M, y + 3, { align: 'right' });
     y += 8;
-
-    /* page break check */
-    if (y > 255) { doc.addPage(); y = M; }
   });
 
   /* grand total */
-  const maxTotal = SECTIONS.reduce((a, s) => a + s.items.length * 10, 0);
+  const maxTotal = scores._totalMax;
   doc.setDrawColor(...gold); doc.setLineWidth(0.5);
   doc.line(M, y, W - M, y); y += 6;
   doc.setFillColor(...gold);
@@ -829,18 +840,20 @@ async function buildPDF() {
   /* comments */
   const writeBlock = (heading, text) => {
     if (!text) return;
+    const lines = doc.splitTextToSize(text, CW);
+    const blockHeight = 5 + lines.length * 5 + 5; // heading + text + spacing
+    if (y + blockHeight > PAGE_BOTTOM) { doc.addPage(); y = M; }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...navy);
     doc.text(heading.toUpperCase(), M, y); y += 5;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...ink);
-    const lines = doc.splitTextToSize(text, CW);
     doc.text(lines, M, y); y += lines.length * 5 + 5;
-    if (y > 260) { doc.addPage(); y = M; }
   };
 
   writeBlock('General Comments', comments);
   writeBlock('Recommendations', recs);
 
   /* recommendations box */
+  if (y + 28 > PAGE_BOTTOM) { doc.addPage(); y = M; }
   doc.setDrawColor(...[220, 215, 208]); doc.setLineWidth(0.3);
   doc.roundedRect(M, y, CW, 22, 2, 2);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...navy);
@@ -915,7 +928,7 @@ async function submitForm() {
     document.getElementById('progress-bar').style.display = 'none';
     document.getElementById('progress-label').style.display = 'none';
 
-    const maxTotal = SECTIONS.reduce((a, s) => a + s.items.length * 10, 0);
+    const maxTotal = scores._totalMax;
 
     document.getElementById('success-who').textContent = adj + '  ·  ' + perf;
     document.getElementById('success-file').textContent = 'Saved to evaluations/';
@@ -924,7 +937,7 @@ async function submitForm() {
     const grid = document.getElementById('score-grid');
     grid.innerHTML = '';
     SECTIONS.forEach(sec => {
-      const max = sec.items.length * 10;
+      const max = scores._max[sec.label] || 0;
       const div = document.createElement('div');
       div.className = 'score-item';
       div.innerHTML = '<div class="sv">' + (scores[sec.label] || 0) + '<span style="font-size:0.9rem;color:var(--ink-muted)">/' + max + '</span></div><div class="sk">' + sec.label.replace('Performance — ', '') + '</div>';
