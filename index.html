@@ -920,7 +920,7 @@ async function submitForm() {
     pdfSucceeded = true;
   } catch (err) {
     console.error(err);
-    showToast('Error saving PDF — please try again.', true);
+    showToast('PDF failed — scores recorded in CSV backup.', true);
   }
 
   /* CSV always runs regardless of PDF outcome so the record survives even
