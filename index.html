@@ -879,23 +879,29 @@ async function submitForm() {
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
+  const adj    = document.getElementById('adjudicator').value;
+  const perf   = document.getElementById('performer').value;
+  const meta   = { adj, perf };
+  const scores = calcScores();
+
+  let pdfFilename  = '';
+  let pdfSucceeded = false;
+
   showToast('Generating PDF…');
 
   try {
-    const doc = await buildPDF();
+    const doc      = await buildPDF();
     const pdfBase64 = doc.output('datauristring').split(',')[1];
 
-    const adj  = document.getElementById('adjudicator').value;
-    const perf = document.getElementById('performer').value;
-    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const ts       = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeName = perf.replace(/[^a-z0-9]/gi, '_');
     const safeAdj  = adj.split(' ')[0];
-    const filename = GH_PATH + '/' + safeName + '_' + safeAdj + '_' + ts + '.pdf';
+    pdfFilename    = GH_PATH + '/' + safeName + '_' + safeAdj + '_' + ts + '.pdf';
 
     showToast('Saving to repository…');
 
     const res = await fetch(
-      'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + filename,
+      'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + pdfFilename,
       {
         method: 'PUT',
         headers: {
@@ -911,48 +917,49 @@ async function submitForm() {
     );
 
     if (!res.ok) throw new Error('GitHub API error: ' + res.status);
-
-    const scores = calcScores();
-
-    try {
-      await appendCsvRow(csvRow({ adj, perf }, scores, filename), { adj, perf });
-      showToast('Saved!');
-    } catch (csvErr) {
-      console.error('CSV append failed (PDF was saved):', csvErr);
-      showToast('PDF saved — CSV backup failed.', true);
-    }
-
-    /* show success */
-    document.getElementById('section-7').classList.remove('active');
-    document.getElementById('nav').style.display = 'none';
-    document.getElementById('progress-bar').style.display = 'none';
-    document.getElementById('progress-label').style.display = 'none';
-
-    const maxTotal = scores._totalMax;
-
-    document.getElementById('success-who').textContent = adj + '  ·  ' + perf;
-    document.getElementById('success-file').textContent = 'Saved to evaluations/';
-    document.getElementById('total-score').textContent = scores._total + ' / ' + maxTotal;
-
-    const grid = document.getElementById('score-grid');
-    grid.innerHTML = '';
-    SECTIONS.forEach(sec => {
-      const max = scores._max[sec.label] || 0;
-      const div = document.createElement('div');
-      div.className = 'score-item';
-      div.innerHTML = '<div class="sv">' + (scores[sec.label] || 0) + '<span style="font-size:0.9rem;color:var(--ink-muted)">/' + max + '</span></div><div class="sk">' + sec.label.replace('Performance — ', '') + '</div>';
-      grid.appendChild(div);
-    });
-
-    document.getElementById('success-screen').classList.add('active');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-
+    pdfSucceeded = true;
   } catch (err) {
     console.error(err);
-    showToast('Error saving — please try again.', true);
+    showToast('Error saving PDF — please try again.', true);
+  }
+
+  /* CSV always runs regardless of PDF outcome so the record survives even
+     if the PDF generation or commit failed. pdfFilename is '' when PDF failed. */
+  try {
+    await appendCsvRow(csvRow(meta, scores, pdfFilename), meta);
+    if (pdfSucceeded) showToast('Saved!');
+  } catch (csvErr) {
+    console.error('CSV append failed:', csvErr);
+    if (pdfSucceeded) showToast('PDF saved — CSV backup failed.', true);
+  }
+
+  if (!pdfSucceeded) {
     btn.disabled = false;
     btn.textContent = 'Submit →';
+    return;
   }
+
+  document.getElementById('section-7').classList.remove('active');
+  document.getElementById('nav').style.display = 'none';
+  document.getElementById('progress-bar').style.display = 'none';
+  document.getElementById('progress-label').style.display = 'none';
+
+  document.getElementById('success-who').textContent = adj + '  ·  ' + perf;
+  document.getElementById('success-file').textContent = 'Saved to evaluations/';
+  document.getElementById('total-score').textContent = scores._total + ' / ' + scores._totalMax;
+
+  const grid = document.getElementById('score-grid');
+  grid.innerHTML = '';
+  SECTIONS.forEach(sec => {
+    const max = scores._max[sec.label] || 0;
+    const div = document.createElement('div');
+    div.className = 'score-item';
+    div.innerHTML = '<div class="sv">' + (scores[sec.label] || 0) + '<span style="font-size:0.9rem;color:var(--ink-muted)">/' + max + '</span></div><div class="sk">' + sec.label.replace('Performance — ', '') + '</div>';
+    grid.appendChild(div);
+  });
+
+  document.getElementById('success-screen').classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /* ── reset ── */
@@ -979,6 +986,16 @@ function resetForm() {
   document.getElementById('btn-next').textContent = 'Next →';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+/* ── unload guard ── */
+function formHasData() {
+  if (Object.values(ratings).some(v => v > 0)) return true;
+  return [...document.querySelectorAll('input, select, textarea')].some(el => el.value.trim() !== '');
+}
+window.onbeforeunload = function(e) {
+  const onSuccess = document.getElementById('success-screen').classList.contains('active');
+  if (!onSuccess && formHasData()) { e.preventDefault(); e.returnValue = ''; }
+};
 
 updateProgress();
 </script>
