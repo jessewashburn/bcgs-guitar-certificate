@@ -585,10 +585,12 @@ const GH_REPO  = 'bcgs-evaluations-data';
 const GH_PATH  = 'evaluations';
 const ROSTER_PATH = 'performers.json'; // root of the data repo
 
-/* Passphrase that gates the in-app roster editor. This is casual-tamper
-   prevention only (the PAT above is already extractable from this page),
-   not real security. Change this before deploying. */
-const ROSTER_PASSPHRASE = 'bcgs-roster';
+/* Passphrase that gates the in-app roster editor. Injected at deploy from the
+   ROSTER_PASSPHRASE Actions secret (placeholder replaced in deploy.yml). This is
+   casual-tamper prevention only — the PAT above is already extractable from this
+   page, so the passphrase still ends up readable in the served HTML; it is not
+   real security. */
+const ROSTER_PASSPHRASE = '__ROSTER_PASS__';
 
 /* ── performer data ──
    Roster lives in the private data repo as performers.json and is fetched

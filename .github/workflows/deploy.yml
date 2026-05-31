@@ -31,24 +31,33 @@ jobs:
           mkdir -p _site
           cp index.html _site/index.html
 
-      - name: Inject PAT into index.html
+      - name: Inject secrets into index.html
         env:
           EVAL_PAT: ${{ secrets.EVAL_PAT }}
+          ROSTER_PASSPHRASE: ${{ secrets.ROSTER_PASSPHRASE }}
         run: |
           if [ -z "$EVAL_PAT" ]; then
             echo "::error::Repository secret EVAL_PAT is not set."
             exit 1
           fi
-          # The roster is fetched at runtime by the page (see SDD-roster-editor.md),
-          # so the only build-time substitution is the data-repo PAT.
-          if ! grep -q "__GH_TOKEN__" _site/index.html; then
-            echo "::error::Placeholder __GH_TOKEN__ not found in index.html."
+          if [ -z "$ROSTER_PASSPHRASE" ]; then
+            echo "::error::Repository secret ROSTER_PASSPHRASE is not set."
             exit 1
           fi
+          # The roster is fetched at runtime by the page (see SDD-roster-editor.md),
+          # so the build-time substitutions are the data-repo PAT and the roster
+          # editor passphrase.
+          for placeholder in __GH_TOKEN__ __ROSTER_PASS__; do
+            if ! grep -q "$placeholder" _site/index.html; then
+              echo "::error::Placeholder $placeholder not found in index.html."
+              exit 1
+            fi
+          done
           python3 - <<'PY'
           import os, pathlib
           html = pathlib.Path('_site/index.html').read_text()
           html = html.replace('__GH_TOKEN__', os.environ['EVAL_PAT'])
+          html = html.replace('__ROSTER_PASS__', os.environ['ROSTER_PASSPHRASE'])
           pathlib.Path('_site/index.html').write_text(html)
           PY
 
