@@ -347,12 +347,13 @@ textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .roster-table td { padding: 0.2rem 0.4rem; vertical-align: middle; }
 .roster-table input { min-width: 110px; }
-.roster-table td.del-cell { width: 1%; }
-.row-del {
+.roster-table td.act-cell { width: 1%; white-space: nowrap; text-align: right; }
+.row-move, .row-del {
   border: none; background: none; cursor: pointer;
   color: var(--ink-muted); font-size: 1rem; line-height: 1;
-  padding: 0.3rem 0.4rem;
+  padding: 0.3rem 0.35rem;
 }
+.row-move:hover { color: var(--gold); }
 .row-del:hover { color: #c0392b; }
 #add-row { margin-top: 1rem; }
 
@@ -669,7 +670,7 @@ function setPerformerPlaceholder(text, value) {
 
 function populatePerformerDropdown() {
   setPerformerPlaceholder('Select performer', '');
-  Object.keys(PERFORMERS).sort((a, b) => a.localeCompare(b)).forEach(name => {
+  Object.keys(PERFORMERS).forEach(name => {
     const opt = document.createElement('option');
     opt.textContent = name;
     performerSelect.appendChild(opt);
@@ -793,23 +794,53 @@ function rosterRow(name, p) {
     td.appendChild(inp);
     tr.appendChild(td);
   });
-  const delTd = document.createElement('td');
-  delTd.className = 'del-cell';
+  const actTd = document.createElement('td');
+  actTd.className = 'act-cell';
+
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.className = 'row-move';
+  up.textContent = '↑';
+  up.title = 'Move up';
+  up.addEventListener('click', () => moveRosterRow(tr, -1));
+
+  const down = document.createElement('button');
+  down.type = 'button';
+  down.className = 'row-move';
+  down.textContent = '↓';
+  down.title = 'Move down';
+  down.addEventListener('click', () => moveRosterRow(tr, 1));
+
   const del = document.createElement('button');
   del.type = 'button';
   del.className = 'row-del';
   del.textContent = '✕';
   del.title = 'Remove performer';
   del.addEventListener('click', () => tr.remove());
-  delTd.appendChild(del);
-  tr.appendChild(delTd);
+
+  actTd.appendChild(up);
+  actTd.appendChild(down);
+  actTd.appendChild(del);
+  tr.appendChild(actTd);
   return tr;
+}
+
+/* Reorder a roster row within the table. Order is preserved on save:
+   saveRoster reads rows top-to-bottom, so the row order becomes the key
+   order in performers.json and the option order in the dropdown. */
+function moveRosterRow(tr, dir) {
+  const tbody = tr.parentNode;
+  if (dir < 0 && tr.previousElementSibling) {
+    tbody.insertBefore(tr, tr.previousElementSibling);
+  } else if (dir > 0 && tr.nextElementSibling) {
+    tbody.insertBefore(tr.nextElementSibling, tr);
+  }
 }
 
 function renderRosterRows() {
   const tbody = document.getElementById('roster-rows');
   tbody.innerHTML = '';
-  const names = Object.keys(PERFORMERS).sort((a, b) => a.localeCompare(b));
+  const names = Object.keys(PERFORMERS);
   if (names.length === 0) {
     tbody.appendChild(rosterRow('', {}));
   } else {

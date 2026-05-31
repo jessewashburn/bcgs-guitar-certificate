@@ -131,10 +131,11 @@ Consistent with the editorial aesthetic and color tokens in parent §11.
 - **Entry point:** a small, unobtrusive "Manage roster" text link in the page footer / below the form card (visible on section 1, not mid-evaluation). Not a primary button — it should not compete with the judge's flow.
 - **Passphrase prompt:** a modal (or inline panel) with a single password field + "Unlock". Wrong passphrase → error toast, stays closed.
 - **Editor panel:** overlays/replaces the form card. Contains:
-  - A table: header row (Name*, Age, Level, Repertoire 1, Repertoire 2, ✕) and one editable `<input>` row per performer.
+  - A table: header row (Name*, Age, Level, Repertoire 1, Repertoire 2, actions) and one editable `<input>` row per performer.
   - **"+ Add performer"** button appends a blank row (focus its name field).
-  - Per-row **✕** removes that row (no confirm for an unsaved row; the roster isn't written until Save).
+  - Per-row actions (trailing cell): **↑ / ↓** move the row up/down, **✕** removes it (no confirm for an unsaved row; the roster isn't written until Save).
   - **"Save roster"** (navy primary) and **"Cancel"** (secondary) at the bottom. Cancel discards edits and reverts to the in-memory roster.
+- **Ordering:** rows render in the roster's stored order (no auto-sort), and Save reads rows top-to-bottom — so the table order becomes the key order in `performers.json` and the option order in the performer dropdown. Reordering is purely manual via ↑/↓. (Object key order is preserved by `JSON.stringify` for non-integer string keys, which performer names always are.)
 - **Busy / feedback:** Save shows a "Saving…" state and disables itself during the PUT; results surface via the existing `showToast` (navy info / red error, parent §11).
 - **Responsive:** the table scrolls horizontally on narrow screens, or rows collapse to stacked label/value blocks below 500px (consistent with the form's responsive behavior).
 
