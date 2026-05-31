@@ -348,12 +348,21 @@ textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
 .roster-table td { padding: 0.2rem 0.4rem; vertical-align: middle; }
 .roster-table input { min-width: 110px; }
 .roster-table td.act-cell { width: 1%; white-space: nowrap; text-align: right; }
-.row-move, .row-del {
+.roster-table td.grip-cell { width: 1%; padding-right: 0; }
+.drag-grip {
+  display: inline-block;
+  cursor: grab; user-select: none;
+  color: var(--ink-muted); font-size: 1rem; line-height: 1;
+  padding: 0.4rem 0.25rem;
+}
+.drag-grip:hover { color: var(--gold); }
+.drag-grip:active { cursor: grabbing; }
+.roster-table tr.dragging { opacity: 0.45; background: var(--cream-warm); }
+.row-del {
   border: none; background: none; cursor: pointer;
   color: var(--ink-muted); font-size: 1rem; line-height: 1;
   padding: 0.3rem 0.35rem;
 }
-.row-move:hover { color: var(--gold); }
 .row-del:hover { color: #c0392b; }
 #add-row { margin-top: 1rem; }
 
@@ -547,6 +556,7 @@ textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
         <table class="roster-table">
           <thead>
             <tr>
+              <th></th>
               <th>Name <span class="req">*</span></th><th>Age</th><th>Level</th>
               <th>Repertoire 1</th><th>Repertoire 2</th><th></th>
             </tr>
@@ -590,6 +600,7 @@ let PERFORMERS = {};
 let rosterSha = null;          // blob SHA of performers.json, needed to write it back
 let rosterLoadFailed = false;
 let rosterUnlocked = false;    // passphrase cleared this session
+let draggingRow = null;        // row currently being drag-reordered
 
 /* ── rating definitions ── */
 const SECTIONS = [
@@ -794,48 +805,67 @@ function rosterRow(name, p) {
     td.appendChild(inp);
     tr.appendChild(td);
   });
-  const actTd = document.createElement('td');
-  actTd.className = 'act-cell';
-
-  const up = document.createElement('button');
-  up.type = 'button';
-  up.className = 'row-move';
-  up.textContent = '↑';
-  up.title = 'Move up';
-  up.addEventListener('click', () => moveRosterRow(tr, -1));
-
-  const down = document.createElement('button');
-  down.type = 'button';
-  down.className = 'row-move';
-  down.textContent = '↓';
-  down.title = 'Move down';
-  down.addEventListener('click', () => moveRosterRow(tr, 1));
-
   const del = document.createElement('button');
   del.type = 'button';
   del.className = 'row-del';
   del.textContent = '✕';
   del.title = 'Remove performer';
   del.addEventListener('click', () => tr.remove());
-
-  actTd.appendChild(up);
-  actTd.appendChild(down);
+  const actTd = document.createElement('td');
+  actTd.className = 'act-cell';
   actTd.appendChild(del);
   tr.appendChild(actTd);
+
+  /* leading drag handle. The row becomes draggable only while the grip is
+     held down, so the text inputs stay normally selectable the rest of the
+     time. Order is preserved on save: saveRoster reads rows top-to-bottom,
+     so row order becomes the key order in performers.json and the dropdown. */
+  const gripTd = document.createElement('td');
+  gripTd.className = 'grip-cell';
+  const grip = document.createElement('span');
+  grip.className = 'drag-grip';
+  grip.textContent = '⠿';
+  grip.title = 'Drag to reorder';
+  grip.addEventListener('mousedown', () => { tr.draggable = true; });
+  grip.addEventListener('mouseup',   () => { tr.draggable = false; });
+  gripTd.appendChild(grip);
+  tr.insertBefore(gripTd, tr.firstChild);
+
+  tr.addEventListener('dragstart', e => {
+    draggingRow = tr;
+    tr.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  tr.addEventListener('dragend', () => {
+    tr.draggable = false;
+    tr.classList.remove('dragging');
+    draggingRow = null;
+  });
+
   return tr;
 }
 
-/* Reorder a roster row within the table. Order is preserved on save:
-   saveRoster reads rows top-to-bottom, so the row order becomes the key
-   order in performers.json and the option order in the dropdown. */
-function moveRosterRow(tr, dir) {
-  const tbody = tr.parentNode;
-  if (dir < 0 && tr.previousElementSibling) {
-    tbody.insertBefore(tr, tr.previousElementSibling);
-  } else if (dir > 0 && tr.nextElementSibling) {
-    tbody.insertBefore(tr.nextElementSibling, tr);
+/* During a drag, find the row the cursor is currently above so the dragged
+   row can be inserted before it (or appended if past the last row). */
+function dragAfterRow(tbody, y) {
+  let closest = { offset: -Infinity, el: null };
+  for (const row of tbody.querySelectorAll('tr:not(.dragging)')) {
+    const box = row.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) closest = { offset, el: row };
   }
+  return closest.el;
 }
+
+document.getElementById('roster-rows').addEventListener('dragover', e => {
+  if (!draggingRow) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const tbody = e.currentTarget;
+  const after = dragAfterRow(tbody, e.clientY);
+  if (after == null) tbody.appendChild(draggingRow);
+  else if (after !== draggingRow) tbody.insertBefore(draggingRow, after);
+});
 
 function renderRosterRows() {
   const tbody = document.getElementById('roster-rows');
