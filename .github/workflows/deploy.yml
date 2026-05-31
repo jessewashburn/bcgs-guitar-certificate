@@ -31,7 +31,7 @@ jobs:
           mkdir -p _site
           cp index.html _site/index.html
 
-      - name: Fetch performer roster from private data repo
+      - name: Inject PAT into index.html
         env:
           EVAL_PAT: ${{ secrets.EVAL_PAT }}
         run: |
@@ -39,36 +39,15 @@ jobs:
             echo "::error::Repository secret EVAL_PAT is not set."
             exit 1
           fi
-          http_status=$(curl -sS -o performers.json -w '%{http_code}' \
-            -H "Authorization: token $EVAL_PAT" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/jessewashburn/bcgs-evaluations-data/contents/performers.json")
-          if [ "$http_status" != "200" ]; then
-            echo "::error::Could not fetch performers.json from data repo (HTTP $http_status). Body:"
-            cat performers.json
+          # The roster is fetched at runtime by the page (see SDD-roster-editor.md),
+          # so the only build-time substitution is the data-repo PAT.
+          if ! grep -q "__GH_TOKEN__" _site/index.html; then
+            echo "::error::Placeholder __GH_TOKEN__ not found in index.html."
             exit 1
           fi
-          if ! python3 -c "import json,sys; json.load(open('performers.json'))" 2>/dev/null; then
-            echo "::error::performers.json is not valid JSON."
-            cat performers.json
-            exit 1
-          fi
-
-      - name: Inject roster and PAT into index.html
-        env:
-          EVAL_PAT: ${{ secrets.EVAL_PAT }}
-        run: |
-          for placeholder in __PERFORMERS__ __GH_TOKEN__; do
-            if ! grep -q "$placeholder" _site/index.html; then
-              echo "::error::Placeholder $placeholder not found in index.html."
-              exit 1
-            fi
-          done
           python3 - <<'PY'
           import os, pathlib
           html = pathlib.Path('_site/index.html').read_text()
-          roster = pathlib.Path('performers.json').read_text().strip()
-          html = html.replace('__PERFORMERS__', roster)
           html = html.replace('__GH_TOKEN__', os.environ['EVAL_PAT'])
           pathlib.Path('_site/index.html').write_text(html)
           PY

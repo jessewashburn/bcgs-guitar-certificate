@@ -153,7 +153,7 @@ The CSV append is intentionally non-blocking: if the PDF write succeeds but the 
 
 The roster lives in **`performers.json` at the root of the private data repo** (`bcgs-evaluations-data`). The public app repo and this SDD do not contain any performer names, ages, levels, or repertoire — that's the privacy boundary.
 
-`index.html` declares `const PERFORMERS = __PERFORMERS__;` with a literal placeholder. The Pages deploy workflow fetches `performers.json` from the data repo (authenticated with the same `EVAL_PAT` it already uses for submissions) and substitutes the JSON in place of the placeholder during the build. The deployed page contains the real data; the source on `main` of the app repo does not.
+`index.html` declares `let PERFORMERS = {};` and **fetches `performers.json` at runtime** on page load, authenticated with the same `EVAL_PAT` it already uses for submissions. The roster is held only in memory; neither the app repo source nor the deployed HTML contains any student data. It is also editable in-app via the roster editor (see **`SDD-roster-editor.md`**), which writes `performers.json` straight back to the data repo — edits go live on the next page load with no redeploy.
 
 **File format:** standard JSON, keyed by full performer name:
 
@@ -168,7 +168,7 @@ The roster lives in **`performers.json` at the root of the private data repo** (
 }
 ```
 
-**To update the roster:** edit `performers.json` in the data repo and commit. Then trigger a Pages redeploy on the app repo — either push any change to `index.html`/workflow, or run the workflow manually via Actions → "Deploy to GitHub Pages" → Run workflow. The data repo's pushes do not auto-trigger a redeploy because the workflow lives on the app repo and only watches that repo's `main`.
+**To update the roster:** use the in-app roster editor ("Manage roster" link → passphrase → edit the table → Save). No GitHub visit and no redeploy — the save commits `performers.json` to the data repo and the change is live on the next page load. Editing `performers.json` directly in the data repo still works as a fallback and likewise takes effect on next load (no redeploy needed, since the roster is fetched at runtime). See **`SDD-roster-editor.md`** for the full design.
 
 ---
 
@@ -369,7 +369,8 @@ All state lives in JavaScript variables within the single HTML file. No localSto
 ```js
 const ratings = {};       // { "groupId::itemLabel": 0-10 }
 let current = 1;          // active section number (1-7)
-const PERFORMERS = {...}  // injected at deploy time from data repo
+let PERFORMERS = {};      // fetched at runtime from the data repo; editable in-app
+let rosterSha = null;     // blob SHA of performers.json, needed to write edits back
 const SECTIONS = [...]    // rating group definitions
 ```
 
@@ -382,7 +383,7 @@ Reset on "New evaluation": clears all select/input/textarea values, zeros all ra
 **One-time setup:**
 
 1. Create the **data repo**: `bcgs-evaluations-data`, **Private**, initialize with any file (a README is fine).
-2. Create `performers.json` at the root of the data repo with the roster (see §7 for format).
+2. Optionally create `performers.json` at the root of the data repo with the roster (see §7 for format). This can also be left out and populated entirely through the in-app roster editor, which creates the file on first save.
 3. Generate a fine-grained PAT at github.com/settings/personal-access-tokens/new:
    - Resource owner: `jessewashburn`
    - Repository access: **Only select repositories** → `bcgs-evaluations-data` (NOT the app repo)
@@ -390,11 +391,12 @@ Reset on "New evaluation": clears all select/input/textarea values, zeros all ra
 4. On the **app repo** (`bcgs-guitar-certificate`): Settings → Secrets and variables → Actions → New repository secret. Name: `EVAL_PAT`. Value: the PAT from step 3.
 5. On the **app repo**: Settings → Pages → Source: **GitHub Actions** (not "Deploy from a branch").
 6. Commit `index.html`, `.github/workflows/deploy.yml`, and `SDD.md` to `main` of the app repo.
-7. The workflow runs on push to `main`. It fetches `performers.json` from the data repo, injects roster + PAT into `index.html`, and deploys. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`. The first submission auto-creates `evaluations/evaluations.csv` and the first PDF in the data repo.
+7. The workflow runs on push to `main`. It injects the PAT into `index.html` and deploys. Once it completes (~1 min), the site is live at `https://jessewashburn.github.io/bcgs-guitar-certificate/`. The page fetches `performers.json` at runtime. The first submission auto-creates `evaluations/evaluations.csv` and the first PDF in the data repo.
+8. Set the roster editor passphrase: edit `ROSTER_PASSPHRASE` in `index.html` before committing (see `SDD-roster-editor.md` §2).
 
-**Subsequent updates:** Any push to the app repo's `main` that touches `index.html` (or the workflow itself) triggers a redeploy. The data repo is **not** watched — pushing changes to `performers.json` or `evaluations/` does not redeploy on its own.
+**Subsequent updates:** Any push to the app repo's `main` that touches `index.html` (or the workflow itself) triggers a redeploy. The data repo is **not** watched.
 
-**To update performer data:** Edit `performers.json` in the data repo and commit. Then trigger a redeploy on the app repo: either push any change to `index.html`/workflow, or run the workflow manually via the Actions tab → "Deploy to GitHub Pages" → Run workflow.
+**To update performer data:** No redeploy needed — the roster is fetched at runtime. Use the in-app roster editor ("Manage roster"), or edit `performers.json` directly in the data repo; either way the change is live on the next page load. See `SDD-roster-editor.md`.
 
 **To rotate the GitHub token:**
 1. Generate a new fine-grained PAT (same scope — data repo only, Contents: R/W).
@@ -414,3 +416,25 @@ Reset on "New evaluation": clears all select/input/textarea values, zeros all ra
 | Token rotation | PAT has an expiration date set at creation. Needs manual rotation before expiry. Set a calendar reminder. |
 | Score of 0 | Unrated items score 0. PDF shows "—" for unscored items so it's clear vs. a deliberate 0. Consider whether all items should be required. |
 | No email delivery | PDFs land in the repo. Sending them to participants requires a manual step (download from repo, email). A future enhancement could add a GitHub Action that emails PDFs to participants on commit. |
+| Roster editor passphrase is not real auth | The "Manage roster" gate is checked client-side and the PAT is already extractable from the page (§10). It deters casual/accidental edits only. A real guard would need a backend. See `SDD-roster-editor.md`. |
+| Concurrent roster edits | Saving the roster is a GET-sha → PUT-full-file cycle with one retry on a stale SHA (like the CSV append). Two simultaneous editors → last writer wins. Roster edits are a rare, near-solo admin action, so this is acceptable. |
+| Roster requires connectivity at load | The roster is fetched at runtime; if the fetch fails the performer dropdown is empty and offers a retry. Manual field entry still works, but performer selection depends on a successful fetch. |
+
+---
+
+## 16. Planned Enhancements
+
+The in-app roster editor is specified separately in **`SDD-roster-editor.md`**; the items below are smaller UX changes to the core form.
+
+### 16.1 Deselectable rating pills *(implemented)*
+
+**Problem:** Once a rating pill (1–10) is clicked for an item, there is no way to clear it. If a judge clicks the wrong grade — e.g. taps a score for *Vibrato* by accident — the only "fix" is to pick a different number; they cannot return the item to unrated. This matters because an unrated item is intentionally distinct from any 1–10 score: it scores 0, is excluded from the section/grand max (parent §4 `calcScores`), and renders as "—" in the PDF (§8, §15 "Score of 0").
+
+**Desired behavior:** clicking the **already-selected** pill toggles it **off** — the item returns to unrated (rating 0), the pill loses its `selected` state, and the row loses its `rated` state. Clicking a *different* pill still just moves the selection as today.
+
+**Implementation note:** in the pill click handler (`index.html` ~L530), branch on whether this pill is already the selected one:
+- If `ratings[key] === i` (re-click of the active pill) → set `ratings[key] = 0`, remove `selected` from all pills in the row, remove `rated` from the row.
+- Else → existing behavior (set `ratings[key] = i`, mark this pill `selected`, mark the row `rated`).
+
+No change to scoring, PDF, or CSV logic — they already treat 0 as unrated, so a toggled-off item flows through correctly.
+
